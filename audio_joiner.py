@@ -3,16 +3,15 @@ import argparse
 import subprocess
 from pathlib import Path
 
-def join_audio_files(book_name, ext=".mp3"):
+def join_audio_files(book_name, ext=None):
     """
     여러 오디오 파일을 ffmpeg를 사용하여 하나로 합치는 스크립트입니다.
     output/[book_name]/audio/ 폴더의 모든 오디오 파일을 읽어
-    output/[book_name]/audiobook.mp3 파일로 저장합니다.
+    output/[book_name]/audiobook.[확장자] 파일로 저장합니다.
     """
     project_root = Path(__file__).resolve().parent
     book_dir = project_root / "output" / book_name
     input_path = book_dir / "audio"
-    output_path = book_dir / "audiobook.mp3"
     
     if not input_path.exists() or not input_path.is_dir():
         print(f"오류: 텍스트 및 오디오 폴더 구조를 찾을 수 없습니다.")
@@ -21,10 +20,21 @@ def join_audio_files(book_name, ext=".mp3"):
         return
 
     # 지정된 확장자를 가진 파일 검색
-    audio_files = list(input_path.glob(f"*{ext}"))
+    if ext:
+        audio_files = list(input_path.glob(f"*{ext}"))
+        ext_display = ext
+    else:
+        audio_files = list(input_path.glob("*.mp3")) + list(input_path.glob("*.m4a")) + list(input_path.glob("*.wav"))
+        ext_display = "오디오(.mp3, .m4a, .wav)"
+
     if not audio_files:
-        print(f"'{input_path}' 폴더에 '{ext}' 확장자를 가진 오디오 파일이 없습니다.")
+        print(f"'{input_path}' 폴더에 '{ext_display}' 파일이 없습니다.")
         return
+
+    # 입력 파일의 확장자 확인
+    first_ext = audio_files[0].suffix.lower()
+    # 출력 파일명을 '폴더명(책이름).mp3' 로 고정
+    output_path = book_dir / f"{book_name}.mp3"
 
     # 파일명을 기준으로 1차 정렬 (01_xxx, 02_xxx 형식일 경우 순서대로 정렬됨)
     audio_files.sort()
@@ -76,10 +86,18 @@ def join_audio_files(book_name, ext=".mp3"):
         "-y",               # 덮어쓰기 허용
         "-f", "concat",
         "-safe", "0",
-        "-i", str(list_file_path),
-        "-c", "copy",
-        str(output_path)
+        "-i", str(list_file_path)
     ]
+
+    # 입력 파일이 mp3이면 파일 복사(-c copy)로 빠르게 합치고
+    # m4a 등 다른 확장자면 mp3로 변환(인코딩)하며 합치기
+    if first_ext == ".mp3":
+        cmd.extend(["-c", "copy"])
+    else:
+        cmd.extend(["-c:a", "libmp3lame", "-b:a", "128k"])
+        print("* 원본이 mp3가 아니므로 mp3로 변환하며 병합합니다. (시간이 조금 더 걸릴 수 있습니다) *")
+
+    cmd.append(str(output_path))
 
     try:
         # ffmpeg 실행 (cwd를 input_path로 설정하여 상대경로 인식)
@@ -99,7 +117,7 @@ def join_audio_files(book_name, ext=".mp3"):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="output 폴더 구조에 맞춰 오디오 파일들을 하나로 자동 병합합니다.")
     parser.add_argument("book_name", help="합칠 오디오가 있는 책 이름 (예: 'Guns, Germs, and Steel - The Fates of Human Societies. (Jared Diamond)')")
-    parser.add_argument("--ext", default=".mp3", help="병합할 파일들의 확장자 (기본값: .mp3)")
+    parser.add_argument("--ext", default=None, help="병합할 파일들의 특정 확장자 지정 (기본값: 자동 탐색 .mp3, .m4a, .wav)")
 
     args = parser.parse_args()
     join_audio_files(args.book_name, args.ext)
